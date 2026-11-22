@@ -1,0 +1,12 @@
+{
+  "name": "bypass-link-ditxzproduct",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bypass Link ditxzproduct - Node.js redirect resolver",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
