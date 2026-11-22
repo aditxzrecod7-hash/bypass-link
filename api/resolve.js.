@@ -1,0 +1,105 @@
+
+const dns = require("dns").promises;
+const net = require("net");
+
+const ALLOWED_HOSTS = new Set([
+  "sfl.gl",
+  "www.sfl.gl"
+]);
+
+function isPrivateIP(ip) {
+  if (net.isIPv4(ip)) {
+    const p = ip.split(".").map(Number);
+    return (
+      p[0] === 10 ||
+      p[0] === 127 ||
+      p[0] === 0 ||
+      (p[0] === 169 && p[1] === 254) ||
+      (p[0] === 172 && p[1] >= 16 && p[1] <= 31) ||
+      (p[0] === 192 && p[1] === 168
+      )
+    );
+  }
+
+  if (net.isIPv6(ip)) {
+    const s = ip.toLowerCase();
+    return (
+      s === "::1" ||
+      s === "::" ||
+      s.startsWith("fc") ||
+      s.startsWith("fd") ||
+      s.startsWith("fe80:")
+    );
+  }
+
+  return true;
+}
+
+async function checkHost(host) {
+  const records = await dns.lookup(host, { all: true });
+  return records.length > 0 &&
+    records.every(r => !isPrivateIP(r.address));
+}
+
+module.exports = async (req, res) => {
+  res.setHeader("Content-Type", "application/json");
+
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Method not allowed" });
+    return;
+  }
+
+  try {
+    const input = req.body?.url;
+
+    if (typeof input !== "string" || input.length > 2048) {
+      res.status(400).json({ error: "URL tidak valid" });
+      return;
+    }
+
+    const initial = new URL(input);
+
+    if (
+      initial.protocol !== "https:" ||
+      !ALLOWED_HOSTS.has(initial.hostname)
+    ) {
+      res.status(400).json({ error: "Domain tidak didukung" });
+      return;
+    }
+
+    let current = initial;
+
+    for (let i = 0; i < 5; i++) {
+      if (!(await checkHost(current.hostname))) {
+        throw new Error("Alamat tujuan tidak aman");
+      }
+
+      const response = await fetch(current, {
+        method: "HEAD",
+        redirect: "manual",
+        signal: AbortSignal.timeout(7000)
+      });
+
+      const location = response.headers.get("location");
+
+      if (![301, 302, 303, 307, 308].includes(response.status) || !location) {
+        return res.status(200).json({
+          success: true,
+          destination: current.href
+        });
+      }
+
+      current = new URL(location, current);
+
+      if (!["http:", "https:"].includes(current.protocol)) {
+        throw new Error("Protokol tidak didukung");
+      }
+    }
+
+    throw new Error("Terlalu banyak pengalihan");
+  } catch (error) {
+    return res.status(400).json({
+      error: error.message || "Gagal membaca link"
+    });
+  }
+};
